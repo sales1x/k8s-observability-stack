@@ -1,0 +1,171 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: demo-api-slo
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: obs-lab
+spec:
+  groups:
+    # ------------------------------------------------------------------
+    # Recording rules: pre-calculam a taxa de erro em varias janelas.
+    # Isso deixa os alertas baratos de avaliar e faceis de ler.
+    # ------------------------------------------------------------------
+    - name: demo-api.slo.recording
+      interval: 30s
+      rules:
+        - record: demo_api:erro_requisicoes:ratio_rate5m
+          expr: |
+            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[5m]))
+              /
+            sum(rate(http_requests_total{job="demo-api"}[5m]))
+        - record: demo_api:erro_requisicoes:ratio_rate30m
+          expr: |
+            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[30m]))
+              /
+            sum(rate(http_requests_total{job="demo-api"}[30m]))
+        - record: demo_api:erro_requisicoes:ratio_rate1h
+          expr: |
+            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[1h]))
+              /
+            sum(rate(http_requests_total{job="demo-api"}[1h]))
+        - record: demo_api:erro_requisicoes:ratio_rate2h
+          expr: |
+            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[2h]))
+              /
+            sum(rate(http_requests_total{job="demo-api"}[2h]))
+        - record: demo_api:erro_requisicoes:ratio_rate6h
+          expr: |
+            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[6h]))
+              /
+            sum(rate(http_requests_total{job="demo-api"}[6h]))
+        - record: demo_api:erro_requisicoes:ratio_rate1d
+          expr: |
+            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[1d]))
+              /
+            sum(rate(http_requests_total{job="demo-api"}[1d]))
+        - record: demo_api:erro_requisicoes:ratio_rate3d
+          expr: |
+            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[3d]))
+              /
+            sum(rate(http_requests_total{job="demo-api"}[3d]))
+        - record: demo_api:erro_requisicoes:ratio_rate30d
+          expr: |
+            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[30d]))
+              /
+            sum(rate(http_requests_total{job="demo-api"}[30d]))
+        # Latencia: proporcao de requisicoes servidas dentro do limite de 250ms.
+        - record: demo_api:latencia_dentro_do_alvo:ratio_rate1h
+          expr: |
+            sum(rate(http_request_duration_seconds_bucket{job="demo-api",le="0.25"}[1h]))
+              /
+            sum(rate(http_request_duration_seconds_count{job="demo-api"}[1h]))
+        - record: demo_api:latencia_p95:seconds
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{job="demo-api"}[5m]))
+            )
+        # Error budget restante da janela de 30 dias, em porcentagem.
+        - record: demo_api:error_budget_restante:ratio30d
+          expr: |
+            1 - (demo_api:erro_requisicoes:ratio_rate30d / 0.001)
+
+    # ------------------------------------------------------------------
+    # Alertas multi-janela / multi-burn-rate (SRE Workbook, cap. 5).
+    # Objetivo: pagina rapido para queima agressiva e abre ticket para
+    # queima lenta, sem acordar ninguem por ruido de curto prazo.
+    # ------------------------------------------------------------------
+    - name: demo-api.slo.alerts
+      rules:
+        - alert: DemoApiQueimaRapidaErrorBudget
+          expr: |
+            demo_api:erro_requisicoes:ratio_rate1h > (14.4 * 0.001)
+              and
+            demo_api:erro_requisicoes:ratio_rate5m > (14.4 * 0.001)
+          for: 2m
+          labels:
+            severity: critical
+            slo: disponibilidade
+            equipe: plataforma
+          annotations:
+            summary: "demo-api consumindo error budget 14.4x mais rapido que o previsto"
+            description: "Nesse ritmo o budget de 30 dias acaba em menos de 2 dias. Taxa de erro em 1h: {{ $value | humanizePercentage }}."
+            runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-alta-taxa-de-erro.md"
+
+        - alert: DemoApiQueimaModeradaErrorBudget
+          expr: |
+            demo_api:erro_requisicoes:ratio_rate6h > (6 * 0.001)
+              and
+            demo_api:erro_requisicoes:ratio_rate30m > (6 * 0.001)
+          for: 15m
+          labels:
+            severity: critical
+            slo: disponibilidade
+            equipe: plataforma
+          annotations:
+            summary: "demo-api com queima moderada de error budget (6x)"
+            description: "Taxa de erro em 6h: {{ $value | humanizePercentage }}."
+            runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-alta-taxa-de-erro.md"
+
+        - alert: DemoApiQueimaLentaErrorBudget
+          expr: |
+            demo_api:erro_requisicoes:ratio_rate1d > (3 * 0.001)
+              and
+            demo_api:erro_requisicoes:ratio_rate2h > (3 * 0.001)
+          for: 1h
+          labels:
+            severity: warning
+            slo: disponibilidade
+            equipe: plataforma
+          annotations:
+            summary: "demo-api queimando error budget de forma lenta e persistente"
+            description: "Abrir tarefa de investigacao no proximo dia util. Taxa de erro em 1d: {{ $value | humanizePercentage }}."
+            runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-alta-taxa-de-erro.md"
+
+        - alert: DemoApiLatenciaForaDoAlvo
+          expr: demo_api:latencia_dentro_do_alvo:ratio_rate1h < 0.95
+          for: 10m
+          labels:
+            severity: warning
+            slo: latencia
+            equipe: plataforma
+          annotations:
+            summary: "Menos de 95% das requisicoes de demo-api abaixo de 250ms"
+            runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-latencia-alta.md"
+
+    # ------------------------------------------------------------------
+    # Sintomas de infraestrutura que costumam preceder violacao de SLO.
+    # ------------------------------------------------------------------
+    - name: demo-api.infra.alerts
+      rules:
+        - alert: DemoApiPodEmCrashLoop
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="demo"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: critical
+            equipe: plataforma
+          annotations:
+            summary: "Pod {{ $labels.pod }} reiniciando repetidamente"
+            runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-crashloop.md"
+
+        - alert: DemoApiPoucasReplicasProntas
+          expr: |
+            kube_deployment_status_replicas_available{namespace="demo",deployment="demo-api"} < 2
+          for: 5m
+          labels:
+            severity: critical
+            equipe: plataforma
+          annotations:
+            summary: "demo-api abaixo do minimo de replicas prontas (PDB em risco)"
+
+        - alert: DemoApiSemMetricas
+          expr: up{job="demo-api"} == 0
+          for: 3m
+          labels:
+            severity: warning
+            equipe: plataforma
+          annotations:
+            summary: "Prometheus perdeu o target demo-api"
