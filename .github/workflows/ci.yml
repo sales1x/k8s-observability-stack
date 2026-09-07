@@ -26,8 +26,7 @@ jobs:
         run: |
           pip install pyyaml
           python scripts/extrai_regras.py monitoring/prometheus-rules-slo.yaml /tmp/regras.yaml
-          docker run --rm -v /tmp:/tmp prom/prometheus:v2.53.0 promtool check rules /tmp/regras.yaml
-
+          docker run --rm --entrypoint promtool -v /tmp:/tmp prom/prometheus:v2.53.0 check rules /tmp/regras.yaml
       - name: Validar JSON do dashboard
         run: python -c "import json; json.load(open('monitoring/grafana-dashboard-slo.json'))"
 

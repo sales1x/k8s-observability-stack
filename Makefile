@@ -74,7 +74,7 @@ alertmanager: ## Abre o Alertmanager em localhost:9093
 lint: ## Valida manifests e regras do Prometheus
 	kubectl apply --dry-run=client -f k8s/ > /dev/null && echo "manifests ok"
 	python3 scripts/extrai_regras.py monitoring/prometheus-rules-slo.yaml /tmp/regras.yaml
-	docker run --rm -v /tmp:/tmp prom/prometheus:v2.53.0 promtool check rules /tmp/regras.yaml
+	docker run --rm -v /tmp:/tmp --entrypoint promtool prom/prometheus:v2.53.0 check rules /tmp/regras.yaml
 
 .PHONY: down
 down: ## Destroi o cluster
