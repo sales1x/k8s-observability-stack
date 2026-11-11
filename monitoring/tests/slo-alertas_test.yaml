@@ -1,0 +1,148 @@
+# Testes das regras de SLO com promtool (rodam no make lint e no CI):
+#   python3 scripts/extrai_regras.py monitoring/prometheus-rules-slo.yaml /tmp/regras.yaml
+#   promtool test rules monitoring/tests/slo-alertas_test.yaml
+#
+# Series em requisicoes por minuto: 900/min = 15 req/s, a mesma carga do make carga.
+rule_files:
+  - /tmp/regras.yaml
+
+evaluation_interval: 30s
+
+tests:
+  # Baseline do deployment (FAILURE_RATE=0,05%): dentro do budget, nenhum alerta de SLO.
+  - name: baseline saudavel nao dispara
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/api/pedidos",status="200"}'
+        values: '0+899.55x400'
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/api/pedidos",status="500"}'
+        values: '0+0.45x400'
+    promql_expr_test:
+      # 0,05% de erro = 5 em 10 mil (arredondado para nao depender de ponto flutuante).
+      - expr: round(demo_api:erro_requisicoes:ratio_rate5m * 10000)
+        eval_time: 6h
+        exp_samples:
+          - labels: '{}'
+            value: 5
+    alert_rule_test:
+      - eval_time: 6h
+        alertname: DemoApiQueimaRapidaErrorBudget
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: DemoApiQueimaModeradaErrorBudget
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: DemoApiQueimaLentaErrorBudget
+        exp_alerts: []
+
+  # make incidente: 30% de erro (burn rate 300x). Pending no primeiro minuto, firing apos o for: 2m.
+  - name: incidente de 30 por cento dispara a queima rapida
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/api/pedidos",status="200"}'
+        values: '0+630x30'
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/api/pedidos",status="500"}'
+        values: '0+270x30'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DemoApiQueimaRapidaErrorBudget
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: DemoApiQueimaRapidaErrorBudget
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              slo: disponibilidade
+              equipe: plataforma
+            exp_annotations:
+              summary: "demo-api consumindo error budget 14,4x mais rápido que o previsto"
+              description: "Nesse ritmo o budget de 30 dias acaba em cerca de 2 dias. Taxa de erro em 1h: 30%."
+              runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-alta-taxa-de-erro.md"
+
+  # Probes do kubelet nao entram no SLI: 10% de erro na API com 10x mais trafego de
+  # probes ainda precisa disparar (se as probes contassem, a taxa cairia para ~0,9%).
+  - name: probes nao diluem o SLI
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/api/pedidos",status="200"}'
+        values: '0+54x30'
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/api/pedidos",status="500"}'
+        values: '0+6x30'
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/healthz",status="200"}'
+        values: '0+200x30'
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/readyz",status="200"}'
+        values: '0+400x30'
+    promql_expr_test:
+      - expr: demo_api:erro_requisicoes:ratio_rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'demo_api:erro_requisicoes:ratio_rate5m'
+            value: 0.1
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DemoApiQueimaRapidaErrorBudget
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              slo: disponibilidade
+              equipe: plataforma
+            exp_annotations:
+              summary: "demo-api consumindo error budget 14,4x mais rápido que o previsto"
+              description: "Nesse ritmo o budget de 30 dias acaba em cerca de 2 dias. Taxa de erro em 1h: 10%."
+              runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-alta-taxa-de-erro.md"
+
+  # Sem nenhum 5xx a serie de status 500 nem existe: a taxa precisa ser 0, e nao vazia.
+  - name: sem erros a taxa e zero e o budget fica inteiro
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="demo-api",method="GET",path="/api/pedidos",status="200"}'
+        values: '0+900x30'
+    promql_expr_test:
+      - expr: demo_api:erro_requisicoes:ratio_rate5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'demo_api:erro_requisicoes:ratio_rate5m'
+            value: 0
+      - expr: demo_api:error_budget_restante:ratio30d
+        eval_time: 10m
+        exp_samples:
+          - labels: 'demo_api:error_budget_restante:ratio30d'
+            value: 1
+
+  # 10% das requisicoes acima de 250ms: SLO de latencia (95%) violado por mais de 10m.
+  - name: latencia fora do alvo
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="demo-api",method="GET",path="/api/pedidos",le="0.25"}'
+        values: '0+810x30'
+      - series: 'http_request_duration_seconds_count{job="demo-api",method="GET",path="/api/pedidos"}'
+        values: '0+900x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: DemoApiLatenciaForaDoAlvo
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              slo: latencia
+              equipe: plataforma
+            exp_annotations:
+              summary: "Menos de 95% das requisições de demo-api abaixo de 250ms"
+              description: "Requisições dentro do alvo na última 1h: 90%."
+              runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-latencia-alta.md"
+
+  # Nenhum target da demo-api (deployment removido, ServiceMonitor quebrado).
+  - name: target ausente dispara sem metricas
+    interval: 1m
+    input_series:
+      - series: 'up{job="outro-servico"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DemoApiSemMetricas
+        exp_alerts:
+          - exp_labels:
+              job: demo-api
+              severity: warning
+              equipe: plataforma
+            exp_annotations:
+              summary: "Prometheus sem métricas da demo-api (target falhando ou ausente)"
