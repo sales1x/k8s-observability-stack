@@ -10,6 +10,8 @@ começa a ficar negativa rápido demais.
 
 ![CI](https://github.com/sales1x/k8s-observability-stack/actions/workflows/ci.yml/badge.svg)
 
+![Dashboard de SLO durante um incidente simulado](docs/img/dashboard-incidente.png)
+
 ## Arquitetura
 
 ```mermaid
@@ -98,6 +100,24 @@ O script eleva a taxa de erro da aplicação de 0,05% (o normal, dentro do error
 
 Os mesmos cenários rodam no CI como teste automatizado (`monitoring/tests/slo-alertas_test.yaml`).
 
+### Demonstração
+
+Prints de uma execução do laboratório com `make carga` e `make incidente`. No dashboard do topo,
+o burn rate de 5 minutos sobe até 300x durante o incidente e volta para perto de zero depois
+que o script restaura a taxa de erro.
+
+O alerta de queima rápida em `firing` no Prometheus, com o link do runbook:
+
+![Alerta DemoApiQueimaRapidaErrorBudget em firing no Prometheus](docs/img/prometheus-alerta-firing.png)
+
+O Alertmanager agrupando o alerta pelo SLO e enviando para o receiver do plantão:
+
+![Alertmanager com o grupo slo=disponibilidade no receiver time-plataforma-urgente](docs/img/alertmanager-plantao.png)
+
+O `make incidente` e a notificação que chega ao plantão (`make plantao`):
+
+![Saída do make incidente e do make plantao](docs/img/make-incidente-plantao.png)
+
 ## Decisões de projeto
 
 **Por que burn rate em vez de alertar em "taxa de erro maior que 1%".** Um limiar fixo em
@@ -131,7 +151,7 @@ kind/          definição do cluster local
 k8s/           Deployment, Service, HPA, PDB, ServiceMonitor
 monitoring/    values do Helm, PrometheusRule com os SLOs e testes, dashboard, receptor de webhooks
 scripts/       geração de carga, incidente simulado, extratores de regras e da config do Alertmanager
-docs/          definição de SLO/SLI, política de error budget e runbooks
+docs/          definição de SLO/SLI, política de error budget, runbooks e prints (img/)
 ```
 
 ## Próximos passos
