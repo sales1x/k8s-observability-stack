@@ -26,6 +26,14 @@ LATENCY = Histogram(
 BUILD_INFO = Gauge("app_build_info", "Informacoes de build da aplicacao", ["version"])
 BUILD_INFO.labels(version=APP_VERSION).set(1)
 
+# Inicializa com zero as series que entram no SLI. Um contador com labels so passa a
+# existir no primeiro incremento, e o rate() nao enxerga esse 0 -> 1: cada pod perderia
+# o primeiro 500, o que com 0,05% de erro esconde boa parte dos erros reais.
+for _rota in ("/api/pedidos", "/api/pedidos/lento"):
+    LATENCY.labels("GET", _rota)
+    for _status in ("200", "500"):
+        REQUESTS.labels("GET", _rota, _status)
+
 READY = {"status": True}
 
 
