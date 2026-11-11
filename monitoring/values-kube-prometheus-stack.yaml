@@ -7,7 +7,9 @@ fullnameOverride: kube-prometheus-stack
 
 prometheus:
   prometheusSpec:
-    retention: 15d
+    # A janela do SLO e de 30 dias: com retencao menor, as series *_rate30d e o
+    # painel "Disponibilidade (30d)" cobririam menos tempo do que dizem.
+    retention: 31d
     scrapeInterval: 15s
     evaluationInterval: 30s
     # Sem os seletores abaixo o Operator so enxerga objetos com a label do proprio release.
@@ -33,23 +35,35 @@ alertmanager:
     global:
       resolve_timeout: 5m
     route:
-      group_by: ["alertname", "namespace", "slo"]
+      group_by: ["alertname", "namespace"]
       group_wait: 30s
       group_interval: 5m
       repeat_interval: 4h
       receiver: "time-plataforma"
       routes:
+        # Alertas de "saude do pipeline" do kube-prometheus-stack, nao sao para o plantao.
+        - matchers: ['alertname=~"Watchdog|InfoInhibitor"']
+          receiver: "null"
+        # Alertas de SLO sao agrupados so por slo: as janelas 14,4x e 6x do mesmo
+        # incidente viram uma notificacao so, em vez de duas paginas separadas.
+        - matchers: ['severity="critical"', 'slo=~".+"']
+          group_by: ["slo"]
+          receiver: "time-plataforma-urgente"
         - matchers: ['severity="critical"']
           receiver: "time-plataforma-urgente"
-          continue: false
         - matchers: ['severity="warning"']
           receiver: "time-plataforma"
     inhibit_rules:
-      # Se o servico ja esta paginado como critico, nao mandar o warning junto.
-      - source_matchers: ['severity="critical"']
-        target_matchers: ['severity="warning"']
-        equal: ["namespace", "alertname"]
+      # Se o SLO ja esta paginando como critico, o warning de queima lenta do mesmo SLO
+      # so duplica o ruido. Os alertas tem nomes diferentes, entao a comparacao e por slo;
+      # o slo=~".+" nos dois lados evita que alertas sem slo se inibam entre si.
+      - source_matchers: ['severity="critical"', 'slo=~".+"']
+        target_matchers: ['severity="warning"', 'slo=~".+"']
+        equal: ["slo"]
+    # Os webhooks abaixo caem no webhook-logger (monitoring/webhook-logger.yaml, instalado
+    # pelo make monitoring), que faz o papel do plantao: acompanhe com make plantao.
     receivers:
+      - name: "null"
       - name: "time-plataforma"
         webhook_configs:
           - url: "http://webhook-logger.monitoring.svc:8080/alerta"

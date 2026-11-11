@@ -1,0 +1,137 @@
+# Receptor dos webhooks do Alertmanager (receivers time-plataforma e
+# time-plataforma-urgente). Faz o papel do plantao no laboratorio: cada notificacao
+# vira uma linha no log. Acompanhe com: make plantao
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-logger
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: webhook-logger
+    app.kubernetes.io/part-of: obs-lab
+data:
+  webhook_logger.py: |
+    """Imprime as notificacoes recebidas do Alertmanager (horarios em UTC)."""
+
+    import json
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok\n")
+
+        def do_POST(self):
+            corpo = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            self.send_response(200)
+            self.end_headers()
+            try:
+                payload = json.loads(corpo)
+            except ValueError:
+                print(f"payload invalido em {self.path}", flush=True)
+                return
+            agora = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            canal = "PÁGINA O PLANTÃO" if self.path.endswith("urgente") else "fila do time"
+            print(f"{agora} [{self.path} -> {canal}] grupo={payload.get('groupLabels')} "
+                  f"status={payload.get('status')} alertas={len(payload.get('alerts', []))}",
+                  flush=True)
+            for alerta in payload.get("alerts", []):
+                labels = alerta.get("labels", {})
+                anotacoes = alerta.get("annotations", {})
+                print(f"    {alerta.get('status', '').upper():9} {labels.get('alertname')} "
+                      f"severity={labels.get('severity')} slo={labels.get('slo', '-')}\n"
+                      f"              {anotacoes.get('summary', '')}\n"
+                      f"              runbook: {anotacoes.get('runbook_url', '-')}",
+                      flush=True)
+
+        def log_message(self, *args):
+            pass
+
+
+    if __name__ == "__main__":
+        print("webhook-logger ouvindo em :8080", flush=True)
+        ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-logger
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: webhook-logger
+    app.kubernetes.io/part-of: obs-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: webhook-logger
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: webhook-logger
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: logger
+          image: python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/app/webhook_logger.py"]
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: webhook-logger
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-logger
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: webhook-logger
+spec:
+  selector:
+    app.kubernetes.io/name: webhook-logger
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

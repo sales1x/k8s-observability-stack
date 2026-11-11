@@ -4,7 +4,9 @@ metadata:
   name: demo-api
   namespace: demo
   labels:
-    # A label abaixo precisa casar com o serviceMonitorSelector do Prometheus Operator.
+    # Com serviceMonitorSelectorNilUsesHelmValues: false (values do repo) o Prometheus
+    # enxerga qualquer ServiceMonitor. A label fica para funcionar tambem com os values
+    # padrao do chart, que so selecionam objetos com release: <nome do release>.
     release: kube-prometheus-stack
 spec:
   selector:
