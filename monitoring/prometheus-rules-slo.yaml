@@ -11,61 +11,67 @@ spec:
     # ------------------------------------------------------------------
     # Recording rules: pre-calculam a taxa de erro em varias janelas.
     # Isso deixa os alertas baratos de avaliar e faceis de ler.
+    #
+    # O SLI considera so as rotas de API (path=~"/api/.+"). Probes do kubelet
+    # (/healthz, /readyz) e rotas internas nao sao trafego de usuario: com 3 replicas
+    # as probes somam ~0,9 req/s sempre com 200 e diluiriam a taxa de erro.
+    # O "or vector(0)" faz periodo sem nenhum 5xx valer 0% de erro, e nao "sem dados"
+    # (a serie de status 500 so passa a existir depois do primeiro erro).
     # ------------------------------------------------------------------
     - name: demo-api.slo.recording
       interval: 30s
       rules:
         - record: demo_api:erro_requisicoes:ratio_rate5m
           expr: |
-            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[5m]))
+            (sum(rate(http_requests_total{job="demo-api",path=~"/api/.+",status=~"5.."}[5m])) or vector(0))
               /
-            sum(rate(http_requests_total{job="demo-api"}[5m]))
+            sum(rate(http_requests_total{job="demo-api",path=~"/api/.+"}[5m]))
         - record: demo_api:erro_requisicoes:ratio_rate30m
           expr: |
-            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[30m]))
+            (sum(rate(http_requests_total{job="demo-api",path=~"/api/.+",status=~"5.."}[30m])) or vector(0))
               /
-            sum(rate(http_requests_total{job="demo-api"}[30m]))
+            sum(rate(http_requests_total{job="demo-api",path=~"/api/.+"}[30m]))
         - record: demo_api:erro_requisicoes:ratio_rate1h
           expr: |
-            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[1h]))
+            (sum(rate(http_requests_total{job="demo-api",path=~"/api/.+",status=~"5.."}[1h])) or vector(0))
               /
-            sum(rate(http_requests_total{job="demo-api"}[1h]))
+            sum(rate(http_requests_total{job="demo-api",path=~"/api/.+"}[1h]))
         - record: demo_api:erro_requisicoes:ratio_rate2h
           expr: |
-            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[2h]))
+            (sum(rate(http_requests_total{job="demo-api",path=~"/api/.+",status=~"5.."}[2h])) or vector(0))
               /
-            sum(rate(http_requests_total{job="demo-api"}[2h]))
+            sum(rate(http_requests_total{job="demo-api",path=~"/api/.+"}[2h]))
         - record: demo_api:erro_requisicoes:ratio_rate6h
           expr: |
-            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[6h]))
+            (sum(rate(http_requests_total{job="demo-api",path=~"/api/.+",status=~"5.."}[6h])) or vector(0))
               /
-            sum(rate(http_requests_total{job="demo-api"}[6h]))
+            sum(rate(http_requests_total{job="demo-api",path=~"/api/.+"}[6h]))
         - record: demo_api:erro_requisicoes:ratio_rate1d
           expr: |
-            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[1d]))
+            (sum(rate(http_requests_total{job="demo-api",path=~"/api/.+",status=~"5.."}[1d])) or vector(0))
               /
-            sum(rate(http_requests_total{job="demo-api"}[1d]))
+            sum(rate(http_requests_total{job="demo-api",path=~"/api/.+"}[1d]))
         - record: demo_api:erro_requisicoes:ratio_rate3d
           expr: |
-            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[3d]))
+            (sum(rate(http_requests_total{job="demo-api",path=~"/api/.+",status=~"5.."}[3d])) or vector(0))
               /
-            sum(rate(http_requests_total{job="demo-api"}[3d]))
+            sum(rate(http_requests_total{job="demo-api",path=~"/api/.+"}[3d]))
         - record: demo_api:erro_requisicoes:ratio_rate30d
           expr: |
-            sum(rate(http_requests_total{job="demo-api",status=~"5.."}[30d]))
+            (sum(rate(http_requests_total{job="demo-api",path=~"/api/.+",status=~"5.."}[30d])) or vector(0))
               /
-            sum(rate(http_requests_total{job="demo-api"}[30d]))
+            sum(rate(http_requests_total{job="demo-api",path=~"/api/.+"}[30d]))
         # Latencia: proporcao de requisicoes servidas dentro do limite de 250ms.
         - record: demo_api:latencia_dentro_do_alvo:ratio_rate1h
           expr: |
-            sum(rate(http_request_duration_seconds_bucket{job="demo-api",le="0.25"}[1h]))
+            sum(rate(http_request_duration_seconds_bucket{job="demo-api",path=~"/api/.+",le="0.25"}[1h]))
               /
-            sum(rate(http_request_duration_seconds_count{job="demo-api"}[1h]))
+            sum(rate(http_request_duration_seconds_count{job="demo-api",path=~"/api/.+"}[1h]))
         - record: demo_api:latencia_p95:seconds
           expr: |
             histogram_quantile(
               0.95,
-              sum by (le) (rate(http_request_duration_seconds_bucket{job="demo-api"}[5m]))
+              sum by (le) (rate(http_request_duration_seconds_bucket{job="demo-api",path=~"/api/.+"}[5m]))
             )
         # Error budget restante da janela de 30 dias, em porcentagem.
         - record: demo_api:error_budget_restante:ratio30d
@@ -90,8 +96,8 @@ spec:
             slo: disponibilidade
             equipe: plataforma
           annotations:
-            summary: "demo-api consumindo error budget 14.4x mais rapido que o previsto"
-            description: "Nesse ritmo o budget de 30 dias acaba em menos de 2 dias. Taxa de erro em 1h: {{ $value | humanizePercentage }}."
+            summary: "demo-api consumindo error budget 14,4x mais rápido que o previsto"
+            description: "Nesse ritmo o budget de 30 dias acaba em cerca de 2 dias. Taxa de erro em 1h: {{ $value | humanizePercentage }}."
             runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-alta-taxa-de-erro.md"
 
         - alert: DemoApiQueimaModeradaErrorBudget
@@ -106,7 +112,7 @@ spec:
             equipe: plataforma
           annotations:
             summary: "demo-api com queima moderada de error budget (6x)"
-            description: "Taxa de erro em 6h: {{ $value | humanizePercentage }}."
+            description: "Nesse ritmo o budget de 30 dias acaba em 5 dias. Taxa de erro em 6h: {{ $value | humanizePercentage }}."
             runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-alta-taxa-de-erro.md"
 
         - alert: DemoApiQueimaLentaErrorBudget
@@ -120,8 +126,8 @@ spec:
             slo: disponibilidade
             equipe: plataforma
           annotations:
-            summary: "demo-api queimando error budget de forma lenta e persistente"
-            description: "Abrir tarefa de investigacao no proximo dia util. Taxa de erro em 1d: {{ $value | humanizePercentage }}."
+            summary: "demo-api queimando error budget de forma lenta e persistente (3x)"
+            description: "Abrir tarefa de investigação no próximo dia útil. Taxa de erro em 1d: {{ $value | humanizePercentage }}."
             runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-alta-taxa-de-erro.md"
 
         - alert: DemoApiLatenciaForaDoAlvo
@@ -132,7 +138,8 @@ spec:
             slo: latencia
             equipe: plataforma
           annotations:
-            summary: "Menos de 95% das requisicoes de demo-api abaixo de 250ms"
+            summary: "Menos de 95% das requisições de demo-api abaixo de 250ms"
+            description: "Requisições dentro do alvo na última 1h: {{ $value | humanizePercentage }}."
             runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-latencia-alta.md"
 
     # ------------------------------------------------------------------
@@ -159,13 +166,20 @@ spec:
             severity: critical
             equipe: plataforma
           annotations:
-            summary: "demo-api abaixo do minimo de replicas prontas (PDB em risco)"
+            summary: "demo-api abaixo do mínimo de réplicas prontas (PDB em risco)"
+            description: "Réplicas disponíveis: {{ $value }}. O PodDisruptionBudget exige pelo menos 2."
+            runbook_url: "https://github.com/sales1x/k8s-observability-stack/blob/main/docs/runbook-poucas-replicas.md"
 
+        # "up == 0" pega um target que falha na coleta; "absent" pega o caso em que
+        # nao sobra nenhum target (deployment removido, ServiceMonitor quebrado).
         - alert: DemoApiSemMetricas
-          expr: up{job="demo-api"} == 0
+          expr: |
+            up{job="demo-api"} == 0
+              or
+            absent(up{job="demo-api"})
           for: 3m
           labels:
             severity: warning
             equipe: plataforma
           annotations:
-            summary: "Prometheus perdeu o target demo-api"
+            summary: "Prometheus sem métricas da demo-api (target falhando ou ausente)"
