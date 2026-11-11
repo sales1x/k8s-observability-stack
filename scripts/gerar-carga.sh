@@ -12,7 +12,8 @@ fim=$(( $(date +%s) + DURACAO ))
 
 echo "Enviando ~${RPS} req/s para ${URL} durante ${DURACAO}s"
 while [ "$(date +%s)" -lt "$fim" ]; do
-  curl -s -o /dev/null -w "%{http_code} " "$URL" &
+  # --max-time evita acumular processos curl se a API parar de responder.
+  curl -s --max-time 5 -o /dev/null -w "%{http_code} " "$URL" &
   sleep "$intervalo"
 done
 wait

@@ -6,7 +6,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 APP_VERSION = os.getenv("APP_VERSION", "0.1.0")
-FAILURE_RATE = float(os.getenv("FAILURE_RATE", "0.02"))
+# 0,05% de erro de fundo: abaixo do error budget de 0,1% do SLO de 99,9%.
+FAILURE_RATE = float(os.getenv("FAILURE_RATE", "0.0005"))
 LATENCY_BASE_MS = float(os.getenv("LATENCY_BASE_MS", "30"))
 
 app = FastAPI(title="demo-api", version=APP_VERSION)

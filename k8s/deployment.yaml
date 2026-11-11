@@ -44,9 +44,11 @@ spec:
           env:
             - name: APP_VERSION
               value: "0.1.0"
-            # Taxa de erro artificial usada nos experimentos de queima de error budget.
+            # Taxa de erro artificial de fundo. 0,05% fica dentro do error budget do SLO de
+            # 99,9% (0,1%), entao o servico comeca saudavel; o make incidente eleva para 30%.
+            # Valores acima de ~1,4% ja disparam o alerta de queima rapida (14,4x) sozinhos.
             - name: FAILURE_RATE
-              value: "0.02"
+              value: "0.0005"
             - name: LATENCY_BASE_MS
               value: "30"
           resources:
