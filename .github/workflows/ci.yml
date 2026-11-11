@@ -5,9 +5,16 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  PROM_IMAGE: prom/prometheus:v3.16.0
+  AM_IMAGE: prom/alertmanager:v0.27.0
+
 jobs:
   validar-manifests:
-    name: Validar manifests e regras de SLO
+    name: Validar manifests, scripts e regras de SLO
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,13 +27,37 @@ jobs:
 
       - name: Validar manifests contra o schema do Kubernetes
         run: |
-          kubeconform -strict -ignore-missing-schemas -summary k8s/
+          kubeconform -strict -ignore-missing-schemas -summary k8s/ monitoring/webhook-logger.yaml
+
+      - name: Validar scripts (permissao de execucao e shellcheck)
+        run: |
+          for s in scripts/*.sh; do
+            test -x "$s" || { echo "::error file=$s::sem permissao de execucao (git update-index --chmod=+x $s)"; exit 1; }
+          done
+          shellcheck scripts/*.sh
 
       - name: Validar regras do Prometheus com promtool
         run: |
           pip install pyyaml
           python scripts/extrai_regras.py monitoring/prometheus-rules-slo.yaml /tmp/regras.yaml
-          docker run --rm --entrypoint promtool -v /tmp:/tmp prom/prometheus:v2.53.0 check rules /tmp/regras.yaml
+          docker run --rm --entrypoint promtool -v /tmp:/tmp "$PROM_IMAGE" check rules /tmp/regras.yaml
+
+      - name: Testar os alertas com promtool (incidente, baseline, probes)
+        run: |
+          docker run --rm --entrypoint promtool -v /tmp:/tmp -v "$PWD/monitoring/tests:/tests:ro" \
+            "$PROM_IMAGE" test rules /tests/slo-alertas_test.yaml
+
+      - name: Validar configuracao e rotas do Alertmanager
+        run: |
+          python scripts/extrai_alertmanager.py monitoring/values-kube-prometheus-stack.yaml /tmp/alertmanager.yml
+          amtool() { docker run --rm --entrypoint amtool -v /tmp:/tmp "$AM_IMAGE" "$@"; }
+          amtool check-config /tmp/alertmanager.yml
+          rota() { amtool config routes test --config.file=/tmp/alertmanager.yml --verify.receivers="$@"; }
+          rota time-plataforma-urgente severity=critical slo=disponibilidade
+          rota time-plataforma-urgente severity=critical alertname=DemoApiPoucasReplicasProntas
+          rota time-plataforma severity=warning slo=disponibilidade
+          rota null alertname=Watchdog
+
       - name: Validar JSON do dashboard
         run: python -c "import json; json.load(open('monitoring/grafana-dashboard-slo.json'))"
 
@@ -43,6 +74,12 @@ jobs:
           cluster_name: ci
           node_image: kindest/node:v1.30.0
 
+      - name: Instalar metrics-server (o HPA depende dele)
+        run: |
+          helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+          helm upgrade --install metrics-server metrics-server/metrics-server --version 3.14.0 \
+            --namespace kube-system --set 'args={--kubelet-insecure-tls}' --wait --timeout 5m
+
       - name: Buildar imagem
         run: docker build -t demo-api:ci ./app
 
@@ -52,7 +89,7 @@ jobs:
       - name: Aplicar manifests
         run: |
           kubectl apply -f k8s/namespace.yaml
-          kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml -f k8s/pdb.yaml
+          kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml -f k8s/pdb.yaml -f k8s/hpa.yaml
           kubectl -n demo set image deployment/demo-api api=demo-api:ci
           kubectl -n demo rollout status deployment/demo-api --timeout=180s
 
@@ -62,12 +99,26 @@ jobs:
           sleep 8
           curl -fsS http://localhost:8080/healthz
           curl -fsS http://localhost:8080/readyz
-          curl -fsS http://localhost:8080/metrics | grep -q http_requests_total
+          # A taxa de erro de fundo (0,05%) pode devolver um 500 de proposito: tenta de novo.
+          curl -fsS --retry 3 --retry-all-errors http://localhost:8080/api/pedidos
+          curl -fsS http://localhost:8080/metrics | grep -q 'http_requests_total{method="GET",path="/api/pedidos"'
           echo "smoke test ok"
+
+      - name: HPA lendo a metrica de CPU
+        run: |
+          for _ in $(seq 1 30); do
+            cpu=$(kubectl -n demo get hpa demo-api -o jsonpath='{.status.currentMetrics[0].resource.current.averageUtilization}')
+            if [ -n "$cpu" ]; then echo "HPA ok: CPU em ${cpu}% do request"; exit 0; fi
+            sleep 10
+          done
+          echo "HPA sem metricas depois de 5 minutos"
+          exit 1
 
       - name: Diagnostico em caso de falha
         if: failure()
         run: |
-          kubectl -n demo get pods -o wide
+          kubectl -n demo get pods,hpa -o wide
           kubectl -n demo describe deployment demo-api
+          kubectl -n demo describe hpa demo-api
+          kubectl -n kube-system get pods -l app.kubernetes.io/name=metrics-server
           kubectl -n demo logs -l app.kubernetes.io/name=demo-api --tail=100

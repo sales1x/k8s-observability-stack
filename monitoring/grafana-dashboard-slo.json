@@ -149,7 +149,7 @@
     },
     {
       "type": "stat",
-      "title": "Latencia p95 (5m)",
+      "title": "Latência p95 (5m)",
       "id": 3,
       "gridPos": {
         "h": 5,
@@ -208,7 +208,7 @@
     },
     {
       "type": "stat",
-      "title": "Replicas prontas",
+      "title": "Réplicas prontas",
       "id": 4,
       "gridPos": {
         "h": 5,
@@ -312,7 +312,7 @@
             "uid": "${datasource}"
           },
           "expr": "vector(14.4)",
-          "legendFormat": "limiar critico (14.4x)",
+          "legendFormat": "limiar crítico (14,4x)",
           "refId": "D"
         },
         {
@@ -344,7 +344,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Requisicoes por segundo, por status",
+      "title": "Requisições por segundo (rotas /api), por status",
       "id": 6,
       "gridPos": {
         "h": 9,
@@ -362,7 +362,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (status) (rate(http_requests_total{job=\"demo-api\"}[5m]))",
+          "expr": "sum by (status) (rate(http_requests_total{job=\"demo-api\",path=~\"/api/.+\"}[5m]))",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -389,7 +389,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Latencia p50 / p95 / p99",
+      "title": "Latência p50 / p95 / p99 (rotas /api)",
       "id": 7,
       "gridPos": {
         "h": 8,
@@ -407,7 +407,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"demo-api\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"demo-api\",path=~\"/api/.+\"}[5m])))",
           "legendFormat": "p50",
           "refId": "A"
         },
@@ -416,7 +416,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"demo-api\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"demo-api\",path=~\"/api/.+\"}[5m])))",
           "legendFormat": "p95",
           "refId": "B"
         },
@@ -425,7 +425,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"demo-api\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"demo-api\",path=~\"/api/.+\"}[5m])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -449,7 +449,7 @@
     },
     {
       "type": "timeseries",
-      "title": "CPU e memoria por pod",
+      "title": "CPU e memória por pod",
       "id": 8,
       "gridPos": {
         "h": 8,
@@ -476,8 +476,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"demo\",container=\"api\"}) / 1024 / 1024 / 1024",
-          "legendFormat": "mem GB {{pod}}",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"demo\",container=\"api\"})",
+          "legendFormat": "mem {{pod}}",
           "refId": "B"
         }
       ],
@@ -489,7 +489,44 @@
             "fillOpacity": 10
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "CPU (cores)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "memória"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {

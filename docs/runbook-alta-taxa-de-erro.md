@@ -1,7 +1,8 @@
 # Runbook: alta taxa de erro na demo-api
 
-**Alerta:** `DemoApiQueimaRapidaErrorBudget` / `DemoApiQueimaModeradaErrorBudget`
-**Severidade:** crítica
+**Alerta:** `DemoApiQueimaRapidaErrorBudget` / `DemoApiQueimaModeradaErrorBudget` (críticos)
+e `DemoApiQueimaLentaErrorBudget` (warning: vira tarefa para o próximo dia útil)
+**Severidade:** crítica (queima rápida e moderada) / warning (queima lenta)
 **Impacto:** clientes recebem 5xx ao listar pedidos.
 
 ## 1. Confirmar o impacto (2 min)

@@ -11,11 +11,17 @@ infraestrutura como CPU ou memória.
 
 | SLI | Definição | Origem |
 |-----|-----------|--------|
-| Disponibilidade | requisições sem resposta 5xx / total de requisições | `http_requests_total` |
-| Latência | requisições servidas em até 250ms / total de requisições | `http_request_duration_seconds_bucket` |
+| Disponibilidade | requisições às rotas `/api/...` sem resposta 5xx / total de requisições às rotas `/api/...` | `http_requests_total` |
+| Latência | requisições às rotas `/api/...` servidas em até 250ms / total de requisições às rotas `/api/...` | `http_request_duration_seconds_bucket` |
 
 Erros 4xx não entram no numerador: eles representam uso incorreto do cliente e não falha
 do serviço. Essa decisão foi tomada para evitar que um bug de cliente consuma o budget do time.
+
+Só as rotas de API entram no SLI. As probes do kubelet (`/healthz` e `/readyz`) e as rotas
+internas não são tráfego de usuário: com 3 réplicas, as probes somam cerca de 0,9 req/s,
+sempre com 200, e diluiriam a taxa de erro (em horário sem tráfego, o SLI mostraria 100%
+medindo só as probes). Um período sem nenhum 5xx conta como 0% de erro, e não como
+"sem dados".
 
 ## SLOs
 
